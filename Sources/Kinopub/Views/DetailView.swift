@@ -24,8 +24,14 @@ struct DetailView: View {
     @State private var showTrailer = false
     @State private var heroHovering = false
     @State private var kenBurns = false
+    /// Полноэкранный режим — в нём у окна нет строки заголовка, поэтому
+    /// кнопку «Назад» не надо поднимать (см. `backButtonTopOffset`).
+    @State private var isFullScreen = false
 
     private let heroHeight: CGFloat = 520
+    /// Высота строки заголовка окна, на которую корневой ZStack деталки
+    /// в оконном режиме опускает содержимое. На полном экране её нет.
+    private let windowedTitleBarHeight: CGFloat = 37.5
 
     private var item: KinopubItem { route.item }
     private var info: KinopubItem { fullItem ?? item }
@@ -103,6 +109,13 @@ struct DetailView: View {
         .task(id: info.trailerURL) { await autoPlayTrailer() }
         .onAppear {
             kenBurns = true
+            isFullScreen = NSApp.keyWindow?.styleMask.contains(.fullScreen) ?? false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+            isFullScreen = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+            isFullScreen = false
         }
         .onDisappear {
             trailer.stop()
@@ -294,6 +307,7 @@ struct DetailView: View {
         CloseCircleButton(action: onBack, label: item.russianTitle)
             .padding(.top, 12)
             .padding(.leading, 18)
+            .offset(y: isFullScreen ? 0 : -windowedTitleBarHeight)
     }
 
     // MARK: - Sections
