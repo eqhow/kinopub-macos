@@ -2,6 +2,35 @@ import Foundation
 
 // MARK: - Items
 
+/// Терпимое к формату число: kino.pub иногда присылает `quality` как
+/// Int, String, а в отдельных выдачах — как Bool. Раньше один такой
+/// элемент ронял декодирование всего списка (и главная оставалась пустой).
+struct FlexibleInt: Codable, Hashable {
+    let value: Int?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() {
+            value = nil
+        } else if let i = try? c.decode(Int.self) {
+            value = i
+        } else if let d = try? c.decode(Double.self) {
+            value = Int(d)
+        } else if let s = try? c.decode(String.self) {
+            value = Int(s)
+        } else {
+            // Bool (true/false) или иной тип — считаем «неизвестно».
+            _ = try? c.decode(Bool.self)
+            value = nil
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        if let value { try c.encode(value) } else { try c.encodeNil() }
+    }
+}
+
 struct KinopubItem: Codable, Identifiable, Hashable {
     let id: Int
     let title: String
@@ -12,14 +41,14 @@ struct KinopubItem: Codable, Identifiable, Hashable {
     let imdbRating: Double?
     let kinopoiskRating: Double?
     let imdb: Int?
-    let quality: Int?
+    let quality: FlexibleInt?
     let videos: [VideoFile]?
     let seasons: [Season]?
     let cast: String?
     let director: String?
     let trailer: Trailer?
 
-    var is4K: Bool { quality == 2160 }
+    var is4K: Bool { quality?.value == 2160 }
     /// Рейтинг только если он реально есть: API часто отдаёт 0,
     /// а «0.0» рядом с постером выглядит ошибкой. Берём IMDb, иначе Кинопоиск,
     /// но обязательно положительное значение.
@@ -314,6 +343,12 @@ struct PlayRequest: Codable, Hashable, Identifiable {
     var episodeTitle: String? = nil
     /// С какого времени продолжать просмотр, секунды.
     var startAt: Double? = nil
+    /// ID медиа-тайтла (для сериалов — родительский item id, чтобы marktime знал тайтл).
+    var itemID: Int? = nil
+    /// Номер сезона (для marktime на сериях).
+    var season: Int? = nil
+    /// Номер видео/серии (для marktime на сериях).
+    var video: Int? = nil
 }
 
 // MARK: - Navigation

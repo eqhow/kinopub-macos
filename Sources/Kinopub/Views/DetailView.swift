@@ -610,7 +610,10 @@ struct DetailView: View {
                 url: url,
                 logo: artwork?.logo,
                 subtitle: "S\(seasonNumber) · E\(episode.number)",
-                episodeTitle: episode.title
+                episodeTitle: episode.title,
+                itemID: info.id,
+                season: seasonNumber,
+                video: episode.number
             )
         )
     }

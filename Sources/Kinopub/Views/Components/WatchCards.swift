@@ -21,6 +21,12 @@ enum ResumePlayback {
                 return
             }
             let logo = await MetadataService.shared.artwork(for: full)?.logo
+            var video: Int? = nil
+            var season: Int? = nil
+            if full.isSeries {
+                season = entry.media?.snumber
+                video = entry.media?.number
+            }
             player.open(PlayRequest(
                 id: full.id,
                 title: full.russianTitle,
@@ -28,7 +34,10 @@ enum ResumePlayback {
                 logo: logo,
                 subtitle: entry.episodeLabel,
                 episodeTitle: entry.media?.title,
-                startAt: Double(entry.time ?? 0)
+                startAt: Double(entry.time ?? 0),
+                itemID: full.id,
+                season: season,
+                video: video
             ))
         }
     }

@@ -48,6 +48,21 @@ final class APIClient: ObservableObject {
     func similar(to id: Int) async throws -> [KinopubItem] { try await list("/v1/items/similar", params: ["id": "\(id)"]) }
     func item(id: Int) async throws -> KinopubItem { try await fetch("/v1/items/\(id)") }
 
+    /// Сообщить серверу прогресс просмотра.
+    func markWatch(id: Int, time: Int, video: Int? = nil, season: Int? = nil) async throws {
+        var params: [String: String] = ["id": "\(id)", "time": "\(time)"]
+        if let video { params["video"] = "\(video)" }
+        if let season { params["season"] = "\(season)" }
+        let _: String? = try? await request(path: "/v1/watching/marktime", params: params) { data in
+            // API возвращает {"status":200,"error":null} при успехе
+            guard let wrapper = try? JSONDecoder().decode(KinopubResponse<String>.self, from: data),
+                  wrapper.error == nil else {
+                throw APIError.server("Ошибка отметки времени")
+            }
+            return nil
+        }
+    }
+
     // MARK: - Filters
 
     /// Жанры. В API они разделены по типу (movie/music/docu/tvshow);

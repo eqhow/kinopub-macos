@@ -25,9 +25,11 @@ struct PlayerSurface: NSViewRepresentable {
 struct PlayerWindowView: View {
     let request: PlayRequest
     @EnvironmentObject private var coordinator: PlayerCoordinator
+    @EnvironmentObject private var api: APIClient
     @State private var player = AVPlayer()
     @State private var chromeVisible = true
     @State private var hideWork: DispatchWorkItem?
+    @State private var markTimer: Timer?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -50,9 +52,12 @@ struct PlayerWindowView: View {
         .onAppear {
             beginPlayback()
             revealChrome()
+            startMarkTimer()
         }
         .onDisappear {
             hideWork?.cancel()
+            markTimer?.invalidate()
+            sendFinalMark()
             player.pause()
             player.replaceCurrentItem(with: nil)
         }
@@ -158,7 +163,43 @@ struct PlayerWindowView: View {
 
     private func close() {
         player.pause()
+        markTimer?.invalidate()
+        sendFinalMark()
         coordinator.close()
+    }
+
+    // MARK: - Watch progress sync
+
+    /// Запускает таймер, отправляющий прогресс каждые 15 секунд.
+    private func startMarkTimer() {
+        markTimer?.invalidate()
+        markTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [self] _ in
+            self.sendMark()
+        }
+    }
+
+    /// Отправляет текущую позицию на сервер.
+    private func sendMark() {
+        let time = Int(player.currentTime().seconds)
+        guard time > 0 else { return }
+        let id = request.itemID ?? request.id
+        let video = request.video
+        let season = request.season
+        Task {
+            try? await api.markWatch(id: id, time: time, video: video, season: season)
+        }
+    }
+
+    /// Финальная отметка при закрытии (последняя секунда, с плеера уже остановленного).
+    private func sendFinalMark() {
+        let time = Int(player.currentTime().seconds)
+        guard time > 0 else { return }
+        let id = request.itemID ?? request.id
+        let video = request.video
+        let season = request.season
+        Task {
+            try? await api.markWatch(id: id, time: time, video: video, season: season)
+        }
     }
 }
 
