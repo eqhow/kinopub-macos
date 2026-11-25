@@ -28,7 +28,7 @@ struct DetailView: View {
     /// кнопку «Назад» не надо поднимать (см. `backButtonTopOffset`).
     @State private var isFullScreen = false
 
-    private let heroHeight: CGFloat = 520
+    private let heroHeight: CGFloat = 470
     /// Высота строки заголовка окна, на которую корневой ZStack деталки
     /// в оконном режиме опускает содержимое. На полном экране её нет.
     private let windowedTitleBarHeight: CGFloat = 37.5
@@ -71,7 +71,9 @@ struct DetailView: View {
                         castSection
                         similarSection
                     }
-                    .padding(28)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 6)
+                    .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -143,10 +145,19 @@ struct DetailView: View {
         ZStack(alignment: .top) {
             Color(NSColor.windowBackgroundColor)
             LinearGradient(
-                colors: [tint.opacity(0.50), tint.opacity(0.20), tint.opacity(0.05)],
+                colors: [tint.opacity(0.40), tint.opacity(0.15), tint.opacity(0.05)],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            // Мягкое цветное свечение у верха — hero растворяется в него,
+            // а не в плоскую подложку, поэтому стык не режет глаз.
+            RadialGradient(
+                colors: [tint.opacity(0.14), tint.opacity(0.0)],
+                center: .top,
+                startRadius: 0,
+                endRadius: 560
+            )
+            .blur(radius: 36)
             .opacity(showTrailer ? 0 : 1)
         }
         .ignoresSafeArea()
@@ -159,13 +170,28 @@ struct DetailView: View {
         heroBackdrop
             .frame(maxWidth: .infinity)
             .frame(height: heroHeight)
+            // Низ кадра растворяется в прозрачность — под ним проступает
+            // цветная подложка страницы, поэтому жёсткой кромки нет.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0.0),
+                        .init(color: .white, location: 0.66),
+                        .init(color: .clear, location: 0.95),
+                        .init(color: .clear, location: 1.0),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
             .overlay(alignment: .bottom) {
                 LinearGradient(
                     stops: [
                         .init(color: .black.opacity(0), location: 0.30),
                         .init(color: .black.opacity(0.28), location: 0.62),
-                        .init(color: tint.opacity(0.55), location: 0.86),
-                        .init(color: tint.opacity(0.95), location: 1),
+                        .init(color: .black.opacity(0.52), location: 0.82),
+                        .init(color: .black.opacity(0.28), location: 0.92),
+                        .init(color: .clear, location: 1.0),
                     ],
                     startPoint: .top,
                     endPoint: .bottom
@@ -210,7 +236,7 @@ struct DetailView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 28)
-        .padding(.bottom, 26)
+        .padding(.bottom, 16)
     }
 
     @ViewBuilder
@@ -224,10 +250,6 @@ struct DetailView: View {
 
             Button(action: openTrailerFullscreen) {
                 heroIcon("arrow.up.left.and.arrow.down.right")
-            }
-
-            Button(action: stopTrailer) {
-                heroIcon("xmark")
             }
         }
         .buttonStyle(.plain)
@@ -320,7 +342,8 @@ struct DetailView: View {
                 SecondaryButton(
                     action: toggleTrailer,
                     label: showTrailer ? "Скрыть трейлер" : "Трейлер",
-                    systemImage: showTrailer ? "eye.slash.fill" : "film.fill"
+                    systemImage: showTrailer ? "eye.slash.fill" : "film.fill",
+                    tint: tint
                 )
             }
 

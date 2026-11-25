@@ -55,10 +55,18 @@ final class MetadataService: ObservableObject {
 
     /// Логотип + фон по IMDb-идентификатору из нескольких источников.
     private func resolve(type: String, alternativeType: String, id: String) async -> Artwork? {
-        // 1) Metahub — самый надёжный источник прозрачных логотипов.
-        let logo = await metahubLogo(id: id)
+        // 0) TMDB — русский логотип, если задан API-ключ (приоритетнее оригинала).
+        let russianLogo = await tmdbRussianLogo(imdb: id)
 
-        // 2) Cinemeta — логотип (если Metahub пуст) и широкий кадр.
+        // 1) Metahub — самый надёжный источник прозрачных логотипов (оригинал).
+        let logo: URL?
+        if let russianLogo {
+            logo = russianLogo
+        } else {
+            logo = await metahubLogo(id: id)
+        }
+
+        // 2) Cinemeta — логотип (если пусто) и широкий кадр.
         var cinemetaLogo: URL?
         var backdrop: URL?
         for candidate in [type, alternativeType] {
@@ -74,6 +82,35 @@ final class MetadataService: ObservableObject {
         let finalLogo = logo ?? cinemetaLogo
         guard finalLogo != nil || backdrop != nil else { return nil }
         return Artwork(logo: finalLogo, backdrop: backdrop)
+    }
+
+    /// Русский логотип из TMDB (язык `ru`), если задан API-ключ и он есть.
+    /// Если русского нет — возвращаем nil, и используется оригинал.
+    private func tmdbRussianLogo(imdb: String) async -> URL? {
+        guard let key = AppConfig.tmdbAPIKey, imdb.hasPrefix("tt") else { return nil }
+        guard let findURL = URL(string: "https://api.themoviedb.org/3/find/\(imdb)?external_source=imdb_id&api_key=\(key)"),
+              let find: TMDBFind = try? await get(findURL)
+        else { return nil }
+
+        let media: (type: String, id: Int)?
+        if let m = find.movie_results.first {
+            media = ("movie", m.id)
+        } else if let t = find.tv_results.first {
+            media = ("tv", t.id)
+        } else {
+            media = nil
+        }
+        guard let media else { return nil }
+
+        guard let imagesURL = URL(string:
+                "https://api.themoviedb.org/3/\(media.type)/\(media.id)/images?include_image_language=ru,en,null&api_key=\(key)"),
+              let images: TMDBImages = try? await get(imagesURL)
+        else { return nil }
+
+        guard let path = images.logos.first(where: { $0.iso_639_1 == "ru" })?.file_path else {
+            return nil
+        }
+        return URL(string: "https://image.tmdb.org/t/p/w500\(path)")
     }
 
     /// Прозрачный логотип из публичного Metahub (Stremio) по IMDb ID.
@@ -202,5 +239,25 @@ final class MetadataService: ObservableObject {
     private struct Meta: Decodable {
         let logo: String?
         let background: String?
+    }
+
+    // MARK: - TMDB DTO
+
+    private struct TMDBFind: Decodable {
+        let movie_results: [TMDBResult]
+        let tv_results: [TMDBResult]
+    }
+
+    private struct TMDBResult: Decodable {
+        let id: Int
+    }
+
+    private struct TMDBImages: Decodable {
+        let logos: [TMDBLogo]
+    }
+
+    private struct TMDBLogo: Decodable {
+        let file_path: String?
+        let iso_639_1: String?
     }
 }

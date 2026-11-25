@@ -27,11 +27,13 @@ struct PlayButton: View {
 }
 
 /// Полупрозрачная капсула для второстепенных действий (трейлер,
-/// скрыть трейлер). Не перекрашивается — всегда серая на тёмном фоне.
+/// скрыть трейлер). Красится в акцент страницы, если он передан.
 struct SecondaryButton: View {
     let action: () -> Void
     var label: String
     var systemImage: String? = nil
+    /// Акцентный цвет страницы. Если задан — кнопка тонируется в него.
+    var tint: Color? = nil
 
     var body: some View {
         Button(action: action) {
@@ -44,7 +46,12 @@ struct SecondaryButton: View {
             .font(.headline)
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
-            .background(.white.opacity(0.12), in: Capsule())
+            .background((tint?.opacity(0.22) ?? .white.opacity(0.12)), in: Capsule())
+            .overlay {
+                if let tint {
+                    Capsule().strokeBorder(tint.opacity(0.45), lineWidth: 1)
+                }
+            }
             .foregroundColor(.white)
         }
         .buttonStyle(.plain)

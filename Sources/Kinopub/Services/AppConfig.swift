@@ -22,4 +22,18 @@ enum AppConfig {
         }
         return defaultAPIBase
     }
+
+    /// Ключ TMDB (v3) — нужен только для русских логотипов.
+    /// Можно задать через `KINOPUB_TMDB_KEY` или `defaults write com.kinopub.mac kinopub.tmdbKey "..."`
+    static var tmdbAPIKey: String? {
+        if let env = ProcessInfo.processInfo.environment["KINOPUB_TMDB_KEY"],
+           !env.isEmpty {
+            return env
+        }
+        if let stored = UserDefaults.standard.string(forKey: "kinopub.tmdbKey"),
+           !stored.isEmpty {
+            return stored
+        }
+        return nil
+    }
 }

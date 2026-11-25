@@ -8,6 +8,9 @@ struct HomeView: View {
     @State private var popular: [KinopubItem] = []
     @State private var fresh: [KinopubItem] = []
     @State private var loading = true
+    /// Доминирующий цвет текущего слайда — им подсвечивается низ hero и
+    /// первая секция, чтобы стык был не резным, а «светящимся».
+    @State private var heroGlow: Color = .clear
 
     var body: some View {
         Group {
@@ -19,7 +22,7 @@ struct HomeView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if !hotMovies.isEmpty {
-                            HeroSlider(items: Array(hotMovies.prefix(5)))
+                            HeroSlider(items: Array(hotMovies.prefix(5)), glow: $heroGlow)
                         }
 
                         VStack(alignment: .leading, spacing: 28) {
@@ -40,6 +43,12 @@ struct HomeView: View {
                             }
                         }
                         .padding(24)
+                        // Мягкое цветное свечение снизу hero, перетекающее
+                        // в первую секцию: верх прозрачный (совпадает с фоном
+                        // под hero), ниже — цветное пятно, затем снова фон.
+                        .background(alignment: .top) {
+                            heroGlowBackdrop
+                        }
                     }
                 }
                 .scrollContentBackground(.hidden)
@@ -48,6 +57,24 @@ struct HomeView: View {
         }
         .background(Color(NSColor.windowBackgroundColor))
         .task { await load() }
+    }
+
+    /// Цветное свечение под hero: прозрачно в самой верхней точке (стык с
+    /// hero, чтобы не было шва), плавно разгорается чуть ниже и гаснет.
+    private var heroGlowBackdrop: some View {
+        LinearGradient(
+            stops: [
+                .init(color: heroGlow.opacity(0.0), location: 0.0),
+                .init(color: heroGlow.opacity(0.10), location: 0.12),
+                .init(color: heroGlow.opacity(0.05), location: 0.30),
+                .init(color: heroGlow.opacity(0.0), location: 0.55),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 620)
+        .blur(radius: 34)
+        .allowsHitTesting(false)
     }
 
     func load() async {
@@ -80,6 +107,8 @@ struct HomeView: View {
 /// Слайдер главной: Ken Burns backdrop, трейлер, автопрокрутка.
 struct HeroSlider: View {
     let items: [KinopubItem]
+    /// Доминирующий цвет текущего кадра — наружу для фонового свечения.
+    @Binding var glow: Color
 
     @State private var index = 0
     @StateObject private var trailer = TrailerController()
@@ -108,6 +137,9 @@ struct HeroSlider: View {
             .frame(maxWidth: .infinity)
             .frame(height: 440)
             .overlay(alignment: .bottom) { gradientLayer }
+            // Низ кадра уходит в прозрачность — под ним ровно фон страницы,
+            // поэтому границы не видно. Контент/кнопки ниже маски, не гаснут.
+            .mask(bottomRevealMask)
             .overlay(alignment: .bottomLeading) { contentLayer }
             .overlay(alignment: .topTrailing) { trailerControlsLayer }
             .overlay(alignment: .bottomTrailing) { dots }
@@ -136,7 +168,14 @@ struct HeroSlider: View {
             }
             .task(id: "artwork-\(index)") {
                 guard let item = current else { return }
-                artwork = await MetadataService.shared.artwork(for: item)
+                let art = await MetadataService.shared.artwork(for: item)
+                artwork = art
+                // Цвет свечения считаем по тому же кадру, что и задник,
+                // и плавно перекрашиваем при смене слайда.
+                if let url = art?.backdrop ?? item.widePoster,
+                   let color = await ArtworkPalette.shared.color(for: url) {
+                    withAnimation(.easeInOut(duration: 0.7)) { glow = color }
+                }
             }
             // Один цикл на слайд: определяем наличие трейлера, задаём время
             // показа (с трейлером — 30 с, без него — 12 с), запускаем видео
@@ -216,6 +255,21 @@ struct HeroSlider: View {
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
+    }
+
+    /// Маска растворения низа кадра в фон страницы.
+    private var bottomRevealMask: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .white, location: 0.0),
+                .init(color: .white, location: 0.68),
+                .init(color: .white.opacity(0.9), location: 0.80),
+                .init(color: .clear, location: 0.97),
+                .init(color: .clear, location: 1.0),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 
     private var contentLayer: some View {
