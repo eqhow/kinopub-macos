@@ -126,20 +126,17 @@ struct ContinueCard: View {
             .frame(width: 320, height: 180)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(alignment: .bottomLeading) {
-                VStack(alignment: .leading, spacing: 4) {
-                    if let label = entry.episodeLabel {
-                        Text(label)
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(.white)
-                    }
-                    HStack(spacing: 6) {
-                        Image(systemName: "play.fill").font(.caption)
-                        Text(remainingText ?? "Продолжить").font(.caption.weight(.semibold))
-                    }
+                HStack(spacing: 5) {
+                    Image(systemName: "play.fill").font(.caption2)
+                    Text(remainingText ?? "Продолжить")
+                        .font(.caption.weight(.semibold))
                 }
                 .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.leading, 10)
-                .padding(.bottom, 16)
+                .padding(.bottom, 18)
             }
             .overlay(alignment: .bottom) {
                 WatchProgressBar(fraction: entry.progress)
@@ -162,13 +159,29 @@ struct ContinueCard: View {
             .onHover { hover = $0 }
             .animation(.easeOut(duration: 0.18), value: hover)
 
-            Text(entry.item.russianTitle)
-                .font(.caption.weight(.medium))
-                .lineLimit(1)
-                .frame(width: 320, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.item.russianTitle)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                if let line = episodeLine {
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(width: 320, alignment: .leading)
         }
         .frame(width: 320)
         .contentShape(Rectangle())
+    }
+
+    /// Подпись серии под названием: «S1 · E8 · Название эпизода».
+    private var episodeLine: String? {
+        guard entry.item.isSeries else { return nil }
+        let name = entry.media?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = [entry.episodeLabel, (name?.isEmpty == false ? name : nil)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private var remainingText: String? {
