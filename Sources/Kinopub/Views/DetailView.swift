@@ -71,11 +71,12 @@ struct DetailView: View {
             }
             .scrollContentBackground(.hidden)
             .ignoresSafeArea(.container, edges: .top)
-            // Кнопка «Назад» — overlay на прокрутке: закреплена сверху, не уезжает
-            // и не смещается вниз (координаты совпадают с областью без safe area).
-            .overlay(alignment: .topLeading) {
-                backButton
-            }
+
+            // Кнопка «Назад» — вне ScrollView, на уровне корневого ZStack,
+            // чтобы safe area macOS рассчитывался корректно в окне и на полном
+            // экране, без смещения под строку заголовка.
+            backButton
+                .zIndex(5)
 
             if let actor = selectedActor {
                 ActorProfileView(
@@ -293,10 +294,6 @@ struct DetailView: View {
         CloseCircleButton(action: onBack, label: item.russianTitle)
             .padding(.top, 12)
             .padding(.leading, 18)
-            // Overlay смещён вниз на величину строки заголовка (панель
-            // NavigationSplitView) — поднимаем на неё, чтобы центры кнопок
-            // совпадали с элементами трейлера справа.
-            .offset(y: -37.5)
     }
 
     // MARK: - Sections
