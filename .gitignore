@@ -1,0 +1,19 @@
+# Build artifacts
+.build/
+Kinopub.app/
+*.app
+dist/
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.swiftpm/
+Package.resolved
+
+# Xcode / editors
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+.vscode/
+.idea/
