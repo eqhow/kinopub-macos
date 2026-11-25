@@ -60,9 +60,10 @@ final class WindowConfigView: NSView {
             window.toolbarStyle = .unifiedCompact
 
             let isFullScreen = window.styleMask.contains(.fullScreen)
-            // В полноэкране полоса тулбара — артефакт; в плеере тулбар
-            // (кнопка сайдбара) тоже не нужен и наезжает на кнопки плеера.
-            window.toolbar?.isVisible = !isFullScreen && !self.blackedOut
+            // В полноэкране полоса тулбара — артефакт. В остальных случаях
+            // тулбар оставляем видимым (в т.ч. в плеере), чтобы «светофоры»
+            // стояли на том же месте, что и на всех экранах.
+            window.toolbar?.isVisible = !isFullScreen
 
             if self.blackedOut {
                 // Под видео — чёрный фон, чтобы не было светлой полосы.

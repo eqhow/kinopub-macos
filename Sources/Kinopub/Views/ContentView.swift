@@ -200,9 +200,13 @@ struct ContentView: View {
                 Color.black
                     .ignoresSafeArea()
                     .overlay {
+                        // Нативный «эпловский» индикатор. Принудительно тёмная
+                        // схема — иначе в светлой теме спиннер тёмный и на чёрном
+                        // фоне не виден.
                         ProgressView()
-                            .scaleEffect(0.8)
-                            .tint(.white)
+                            .progressViewStyle(.circular)
+                            .controlSize(.large)
+                            .environment(\.colorScheme, .dark)
                     }
                     .zIndex(15)
             }
