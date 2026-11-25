@@ -320,7 +320,10 @@ struct HeroSlider: View {
                 }
             }
         }
-        .padding(32)
+        .padding(.horizontal, 32)
+        .padding(.top, 32)
+        // Низ кнопок выровнен по низу точек-пунктов слайдера справа.
+        .padding(.bottom, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(infoVisible ? 1 : 0)
     }
