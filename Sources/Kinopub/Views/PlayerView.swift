@@ -11,7 +11,10 @@ struct PlayerSurface: NSViewRepresentable {
         view.player = player
         view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
-        view.showsFullScreenToggleButton = true
+        // Полноэкранную кнопку AVKit убираем: он открывает видео отдельным
+        // окном, из-за чего пропадают наши оверлеи (название, эпизод, крестик).
+        // Фуллскрин делаем через окно приложения — оверлеи остаются видимы.
+        view.showsFullScreenToggleButton = false
         return view
     }
 
@@ -30,6 +33,8 @@ struct PlayerWindowView: View {
     @State private var chromeVisible = true
     @State private var hideWork: DispatchWorkItem?
     @State private var markTimer: Timer?
+    @State private var sleepBlocker = SleepBlocker()
+    @State private var isFullScreen = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -53,13 +58,22 @@ struct PlayerWindowView: View {
             beginPlayback()
             revealChrome()
             startMarkTimer()
+            sleepBlocker.attach(to: player)
+            isFullScreen = NSApp.keyWindow?.styleMask.contains(.fullScreen) ?? false
         }
         .onDisappear {
             hideWork?.cancel()
             markTimer?.invalidate()
+            sleepBlocker.detach()
             sendFinalMark()
             player.pause()
             player.replaceCurrentItem(with: nil)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
+            isFullScreen = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
+            isFullScreen = false
         }
         .onExitCommand {
             close()
@@ -83,8 +97,16 @@ struct PlayerWindowView: View {
     // MARK: - Top bars
 
     private var controlsRow: some View {
-        HStack {
+        HStack(spacing: 10) {
             Spacer(minLength: 0)
+
+            Button(action: toggleFullScreen) {
+                playerChromeIcon(isFullScreen
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right")
+            }
+            .buttonStyle(.plain)
+            .help(isFullScreen ? "Выйти из полноэкранного" : "На весь экран")
 
             CloseCircleButton(action: close, icon: "xmark")
                 .help("Закрыть")
@@ -98,6 +120,17 @@ struct PlayerWindowView: View {
                 endPoint: .bottom
             )
         )
+    }
+
+    private func playerChromeIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 34, height: 34)
+            .background(.black.opacity(0.38), in: Circle())
+            .overlay {
+                Circle().strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
+            }
     }
 
     private var titleBlock: some View {
@@ -161,10 +194,19 @@ struct PlayerWindowView: View {
         }
     }
 
+    private func toggleFullScreen() {
+        (NSApp.keyWindow ?? NSApp.mainWindow)?.toggleFullScreen(nil)
+    }
+
     private func close() {
         player.pause()
         markTimer?.invalidate()
         sendFinalMark()
+        // Если смотрели на весь экран — вернуть окно в обычный режим,
+        // чтобы после закрытия плеера не остаться в полноэкранном приложении.
+        if let window = NSApp.keyWindow, window.styleMask.contains(.fullScreen) {
+            window.toggleFullScreen(nil)
+        }
         coordinator.close()
     }
 

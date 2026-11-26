@@ -47,22 +47,74 @@ struct ActorCard: View {
     }
 }
 
+/// Пульсирующий скелетон-заглушка: статичная заливка + мягко дышащий
+/// акцентный глоу. Без бегущего градиента и без `blur` (пер-кадровое
+/// размытие при анимации даёт мерцание) — поэтому не «моргает».
+struct GlowSkeleton: View {
+    var cornerRadius: CGFloat = 10
+    var tint: Color = .accentColor
+
+    @State private var pulse = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius)
+            .fill(.quaternary.opacity(0.30))
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius)
+                    .fill(tint.opacity(pulse ? 0.20 : 0.05))
+            }
+            .onAppear { startPulse() }
+    }
+
+    private func startPulse() {
+        pulse = false
+        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+            pulse = true
+        }
+    }
+}
+
 struct ActorSkeleton: View {
+    var tint: Color = .accentColor
+
+    @State private var pulse = false
+
     var body: some View {
         VStack(spacing: 8) {
-            ShimmerPlaceholder()
-                .frame(width: 84, height: 84)
-                .clipShape(Circle())
+            ZStack {
+                Circle()
+                    .fill(.quaternary.opacity(0.35))
+                Circle()
+                    .fill(tint.opacity(pulse ? 0.20 : 0.05))
+            }
+            .frame(width: 84, height: 84)
+            .clipShape(Circle())
+            .overlay {
+                Circle().strokeBorder(.white.opacity(0.10), lineWidth: 1)
+            }
 
             Capsule()
                 .fill(.quaternary.opacity(0.5))
                 .frame(width: 68, height: 8)
         }
         .frame(width: 104)
+        .onAppear {
+            pulse = false
+            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }
 
 // MARK: - Actor profile
+
+private struct ActorScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
 
 struct ActorProfileView: View {
     let actor: Actor
@@ -77,6 +129,9 @@ struct ActorProfileView: View {
     @State private var loading = true
     @State private var kinopubItems: [KinopubItem] = []
     @State private var kinopubLoading = true
+    /// Прокрутили так, что шапка с именем ушла — тогда показываем имя
+    /// рядом с кнопкой «Назад».
+    @State private var scrolledPastHeader = false
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -85,6 +140,14 @@ struct ActorProfileView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
+                        .background(
+                            GeometryReader { g in
+                                Color.clear.preference(
+                                    key: ActorScrollOffsetKey.self,
+                                    value: g.frame(in: .named("actorScroll")).minY
+                                )
+                            }
+                        )
                     kinopubSection
                     filmography
                 }
@@ -92,6 +155,15 @@ struct ActorProfileView: View {
                 .padding(.top, 56)
                 .padding(.bottom, 32)
             }
+            .coordinateSpace(name: "actorScroll")
+            .onPreferenceChange(ActorScrollOffsetKey.self) { y in
+                if #available(macOS 15.0, *) {
+                    // На 15+ работает ScrollThresholdTracker.
+                } else {
+                    scrolledPastHeader = y < -150
+                }
+            }
+            .modifier(ScrollThresholdTracker(threshold: 150) { scrolledPastHeader = $0 })
 
             backButton
                 .padding(.horizontal, 0)
@@ -194,9 +266,8 @@ struct ActorProfileView: View {
 
     private var posterSkeleton: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ShimmerPlaceholder()
+            GlowSkeleton(cornerRadius: 10, tint: tint)
                 .frame(width: 160, height: 240)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
 
             Capsule()
                 .fill(.quaternary.opacity(0.5))
@@ -261,12 +332,16 @@ struct ActorProfileView: View {
     }
 
     private var backButton: some View {
-        CloseCircleButton(action: onBack)
-            .padding(.top, 12)
-            .padding(.leading, 18)
-            // Тот же сдвиг, что и в деталке, для единого положения
-            // относительно строки заголовка.
-            .offset(y: -37.5)
+        CloseCircleButton(
+            action: onBack,
+            label: actor.name,
+            labelVisible: scrolledPastHeader
+        )
+        .padding(.top, 12)
+        .padding(.leading, 18)
+        // Тот же сдвиг, что и в деталке, для единого положения
+        // относительно строки заголовка.
+        .offset(y: -37.5)
     }
 
     private var initials: String {

@@ -66,6 +66,8 @@ struct CloseCircleButton: View {
     var icon: String = "chevron.left"
     /// Текст рядом с иконкой (название фильма в деталке).
     var label: String? = nil
+    /// Показывать ли текст (для fade in/out по скроллу).
+    var labelVisible: Bool = true
 
     var body: some View {
         HStack(spacing: 8) {
@@ -96,6 +98,9 @@ struct CloseCircleButton: View {
                         }
                 }
                 .buttonStyle(.plain)
+                .opacity(labelVisible ? 1 : 0)
+                .allowsHitTesting(labelVisible)
+                .animation(.easeInOut(duration: 0.2), value: labelVisible)
             }
         }
     }

@@ -151,7 +151,10 @@ struct ContentView: View {
         .task {
             user = try? await api.user()
             let env = ProcessInfo.processInfo.environment
-            if env["KINOPUB_DBG_PLAY"] != nil, let entry = try? await api.history().first {
+            if let q = env["KINOPUB_DBG_OPEN"], !q.isEmpty,
+               let first = try? await api.search(q).first {
+                navigation.open(first, sourceID: "dbg-open-\(first.id)")
+            } else if env["KINOPUB_DBG_PLAY"] != nil, let entry = try? await api.history().first {
                 ResumePlayback.start(entry, api: api, player: player)
             } else if env["KINOPUB_DBG_SERIES"] != nil,
                let s = try? await api.hotSeries().first {

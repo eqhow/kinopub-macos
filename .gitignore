@@ -17,3 +17,6 @@ Package.resolved
 xcuserdata/
 .vscode/
 .idea/
+
+# Clean build dir
+.build-clean/

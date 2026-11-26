@@ -36,5 +36,9 @@ struct KinopubApp: App {
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentMinSize)
         .windowToolbarStyle(.unifiedCompact)
+
+        Settings {
+            SettingsView()
+        }
     }
 }

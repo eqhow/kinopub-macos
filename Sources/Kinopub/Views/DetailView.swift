@@ -1,5 +1,12 @@
 import SwiftUI
 
+private struct DetailScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 struct DetailView: View {
     let nodeID: UUID
     let route: ItemRoute
@@ -27,6 +34,9 @@ struct DetailView: View {
     /// Полноэкранный режим — в нём у окна нет строки заголовка, поэтому
     /// кнопку «Назад» не надо поднимать (см. `backButtonTopOffset`).
     @State private var isFullScreen = false
+    /// Пользователь прокрутил так, что hero-логотип уже не виден — тогда
+    /// рядом с кнопкой «Назад» показываем название.
+    @State private var scrolledPastHero = false
 
     private let heroHeight: CGFloat = 470
     /// Высота строки заголовка окна, на которую корневой ZStack деталки
@@ -62,6 +72,14 @@ struct DetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
+                        .background(
+                            GeometryReader { g in
+                                Color.clear.preference(
+                                    key: DetailScrollOffsetKey.self,
+                                    value: g.frame(in: .named("detailScroll")).minY
+                                )
+                            }
+                        )
 
                     VStack(alignment: .leading, spacing: 24) {
                         actions
@@ -77,6 +95,15 @@ struct DetailView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .coordinateSpace(name: "detailScroll")
+            .onPreferenceChange(DetailScrollOffsetKey.self) { y in
+                if #available(macOS 15.0, *) {
+                    // На 15+ работает ScrollThresholdTracker ниже.
+                } else {
+                    scrolledPastHero = y < -170
+                }
+            }
+            .modifier(ScrollThresholdTracker(threshold: 170) { scrolledPastHero = $0 })
             .scrollContentBackground(.hidden)
             .ignoresSafeArea(.container, edges: .top)
 
@@ -208,12 +235,19 @@ struct DetailView: View {
 
     private var heroBackdrop: some View {
         ZStack {
+            // Постоянная подложка — то, что было до загрузки artwork.
+            // Переключается на artwork.backdrop с плавным fade, когда
+            // новая картинка загрузилась в RemoteImage.
             RemoteImage(url: artwork?.backdrop ?? info.widePoster) {
-                LinearGradient(
-                    colors: [Color.gray.opacity(0.25), Color.gray.opacity(0.12)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                RemoteImage(url: info.widePoster) {
+                    LinearGradient(
+                        colors: [Color.gray.opacity(0.25), Color.gray.opacity(0.12)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+                .opacity(artwork?.backdrop != nil ? 0 : 1)
+                .animation(.easeInOut(duration: 0.5), value: artwork?.backdrop != nil)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scaleEffect(kenBurns ? 1.06 : 1)
@@ -275,15 +309,23 @@ struct DetailView: View {
 
     @ViewBuilder
     private var logoOrTitle: some View {
-        if let logo = artwork?.logo {
-            RemoteImage(url: logo, contentMode: .fit) {
-                titleText
-            }
-            .frame(maxWidth: 380, maxHeight: 130, alignment: .leading)
-            .shadow(color: .black.opacity(0.55), radius: 10, y: 4)
-        } else {
-            titleText
+        ZStack(alignment: .leading) {
+            if let logo = artwork?.logo {
+                RemoteImage(url: logo, contentMode: .fit) {
+                    titleText
+                }
                 .frame(maxWidth: 380, maxHeight: 130, alignment: .leading)
+                .shadow(color: .black.opacity(0.55), radius: 10, y: 4)
+                .transition(.opacity)
+            }
+
+            // Пока логотип не загрузился — показываем текст.
+            // Когда artwork появляется (логотип есть), текст остаётся
+            // под логотипом до загрузки RemoteImage.
+            titleText
+                .opacity(artwork?.logo != nil ? 0 : 1)
+                .frame(maxWidth: 380, maxHeight: 130, alignment: .leading)
+                .animation(.easeInOut(duration: 0.4), value: artwork?.logo != nil)
         }
     }
 
@@ -326,10 +368,14 @@ struct DetailView: View {
     }
 
     private var backButton: some View {
-        CloseCircleButton(action: onBack, label: item.russianTitle)
-            .padding(.top, 12)
-            .padding(.leading, 18)
-            .offset(y: isFullScreen ? 0 : -windowedTitleBarHeight)
+        CloseCircleButton(
+            action: onBack,
+            label: item.russianTitle,
+            labelVisible: scrolledPastHero
+        )
+        .padding(.top, 12)
+        .padding(.leading, 18)
+        .offset(y: isFullScreen ? 0 : -windowedTitleBarHeight)
     }
 
     // MARK: - Sections
@@ -337,6 +383,23 @@ struct DetailView: View {
     private var actions: some View {
         HStack(spacing: 14) {
             PlayButton(action: playPrimary, tint: tint)
+                .disabled(!itemLoaded || primaryURL == nil)
+                .opacity(itemLoaded ? 1 : 0.7)
+
+            if !itemLoaded && primaryURL == nil {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Загрузка…")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
+                .transition(.opacity)
+            } else if primaryURL == nil {
+                Text("Видео пока недоступно")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            }
 
             if info.trailerURL != nil {
                 SecondaryButton(
@@ -345,24 +408,6 @@ struct DetailView: View {
                     systemImage: showTrailer ? "eye.slash.fill" : "film.fill",
                     tint: tint
                 )
-            }
-
-            // Пока полная карточка не загрузилась — показываем, что идёт
-            // загрузка, а не «видео недоступно» (иначе кажется, что сломано).
-            if primaryURL == nil {
-                if itemLoaded {
-                    Text("Видео пока недоступно")
-                        .font(.callout)
-                        .foregroundColor(.secondary)
-                } else {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Загрузка…")
-                            .font(.callout)
-                            .foregroundColor(.secondary)
-                    }
-                }
             }
 
             Spacer(minLength: 0)
@@ -397,10 +442,14 @@ struct DetailView: View {
                 Text("В ролях").font(.title3.weight(.bold))
 
                 if castLoading {
-                    // Единый «луч» загрузки вместо мигающих кругов.
-                    ShimmerPlaceholder()
-                        .frame(height: 104)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    // Круглые скелетоны в тех же позициях, что и карточки, —
+                    // вместо прыгающего прямоугольника, с мягким свечением.
+                    HStack(spacing: 18) {
+                        ForEach(0..<8, id: \.self) { _ in
+                            ActorSkeleton(tint: tint)
+                        }
+                    }
+                    .padding(.vertical, 4)
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 18) {
@@ -440,7 +489,7 @@ struct DetailView: View {
                 }
 
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 240, maximum: 300), spacing: 14)],
+                    columns: [GridItem(.adaptive(minimum: 240, maximum: 280), spacing: 14)],
                     alignment: .leading,
                     spacing: 16
                 ) {
@@ -461,43 +510,49 @@ struct DetailView: View {
     /// Карточка серии: широкий скрин с номером, названием и прогрессом.
     private func episodeCard(_ episode: Season.Episode) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.gray.opacity(0.12))
+            // Color.clear как якорь размера: коробка строго 16:9 от ширины
+            // колонки, контент рисуется поверх и обрезается — карточки
+            // одинаковые и не наезжают друг на друга.
+            Color.clear
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                .overlay(alignment: .bottomLeading) {
+                    ZStack(alignment: .bottomLeading) {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.gray.opacity(0.12))
 
-                RemoteImage(url: episode.thumbnailURL, contentMode: .fill) {
-                    ShimmerPlaceholder()
-                }
+                        RemoteImage(url: episode.thumbnailURL, contentMode: .fill) {
+                            ShimmerPlaceholder()
+                        }
 
-                LinearGradient(
-                    colors: [.clear, .black.opacity(0.6)],
-                    startPoint: .center,
-                    endPoint: .bottom
-                )
+                        LinearGradient(
+                            colors: [.clear, .black.opacity(0.6)],
+                            startPoint: .center,
+                            endPoint: .bottom
+                        )
 
-                HStack(spacing: 6) {
-                    Image(systemName: episode.watched == 1 ? "checkmark.circle.fill" : "play.circle.fill")
-                        .font(.caption)
-                    Text("Серия \(episode.number)")
-                        .font(.caption.weight(.semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 10)
-            }
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(alignment: .bottom) {
-                if episode.progress > 0.01 {
-                    WatchProgressBar(fraction: episode.progress)
+                        HStack(spacing: 6) {
+                            Image(systemName: episode.watched == 1 ? "checkmark.circle.fill" : "play.circle.fill")
+                                .font(.caption)
+                            Text("Серия \(episode.number)")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .foregroundColor(.white)
                         .padding(.horizontal, 10)
-                        .padding(.bottom, 6)
+                        .padding(.bottom, 10)
+                    }
                 }
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(.white.opacity(0.08), lineWidth: 1)
-            }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .bottom) {
+                    if episode.progress > 0.01 {
+                        WatchProgressBar(fraction: episode.progress)
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 6)
+                    }
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+                }
 
             Text(episode.russianTitle ?? "Серия \(episode.number)")
                 .font(.caption.weight(.medium))
