@@ -5,6 +5,7 @@ struct KinopubApp: App {
     @StateObject private var auth: AuthService
     @StateObject private var api: APIClient
     @StateObject private var player = PlayerCoordinator()
+    @StateObject private var updates = UpdateChecker()
 
     init() {
         let auth = AuthService()
@@ -25,6 +26,12 @@ struct KinopubApp: App {
             .environmentObject(api)
             .environmentObject(player)
             .frame(minWidth: 1100, minHeight: 700)
+            .task { await updates.check() }
+            .sheet(item: $updates.available) { info in
+                UpdateSheet(checker: updates, info: info) {
+                    updates.available = nil
+                }
+            }
         }
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentMinSize)

@@ -2,13 +2,13 @@ import Foundation
 
 /// Централизованная конфигурация приложения.
 ///
-/// Базовый адрес API по умолчанию — официальный `https://api.kinopub.com`.
+/// Базовый адрес API по умолчанию — официальный `https://api.service-kp.com`.
 /// Его можно переопределить, например на собственный прокси:
 /// - переменная окружения `KINOPUB_API_BASE`
 /// - ключ UserDefaults `kinopub.apiBase` (домен `com.kinopub.mac`)
 enum AppConfig {
     /// Официальный адрес API kino.pub.
-    static let defaultAPIBase = "https://api.kinopub.com"
+    static let defaultAPIBase = "https://api.service-kp.com"
 
     /// Действующий базовый адрес API с учётом переопределений.
     static var apiBase: String {
