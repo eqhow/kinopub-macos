@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import SwiftUI
 
 /// SwiftUI `VideoPlayer` на macOS падает в AVKit_SwiftUI,
@@ -11,6 +12,9 @@ struct PlayerSurface: NSViewRepresentable {
         view.player = player
         view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
+        // Нативные контролы (слайдер перемотки/громкости) всегда тёмные:
+        // иначе в светлой теме они белые с чёрным поверх видео.
+        view.appearance = NSAppearance(named: .darkAqua)
         // Полноэкранную кнопку AVKit убираем: он открывает видео отдельным
         // окном, из-за чего пропадают наши оверлеи (название, эпизод, крестик).
         // Фуллскрин делаем через окно приложения — оверлеи остаются видимы.
@@ -21,6 +25,9 @@ struct PlayerSurface: NSViewRepresentable {
     func updateNSView(_ view: AVPlayerView, context: Context) {
         if view.player !== player {
             view.player = player
+        }
+        if view.appearance?.name != .darkAqua {
+            view.appearance = NSAppearance(named: .darkAqua)
         }
     }
 }
@@ -35,6 +42,13 @@ struct PlayerWindowView: View {
     @State private var markTimer: Timer?
     @State private var sleepBlocker = SleepBlocker()
     @State private var isFullScreen = false
+    /// Пока видео реально не пошло — держим постер + центрированный спиннер,
+    /// пряча нативный индикатор AVKit (он смещён и выглядит криво).
+    @State private var loading = true
+    @State private var playbackStarted = false
+    /// Постер, захваченный при открытии (координатор потом его обнулит).
+    @State private var poster: URL?
+    @State private var monitorTask: Task<Void, Never>?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -42,19 +56,28 @@ struct PlayerWindowView: View {
 
             PlayerSurface(player: player)
                 .ignoresSafeArea()
+                .opacity(loading ? 0 : 1)
+
+            if loading {
+                LaunchCurtain(poster: poster)
+                    .transition(.opacity)
+                    .zIndex(5)
+            }
 
             // Логотип по центру, чуть ниже верхней кромки + подпись серии.
             titleBlock
-                .opacity(chromeVisible ? 1 : 0)
-                .allowsHitTesting(chromeVisible)
+                .opacity(chromeVisible && !loading ? 1 : 0)
+                .allowsHitTesting(chromeVisible && !loading)
 
             // Верхний ряд: закрыть справа. Появляется по движению мыши.
             controlsRow
-                .opacity(chromeVisible ? 1 : 0)
-                .allowsHitTesting(chromeVisible)
+                .opacity(chromeVisible && !loading ? 1 : 0)
+                .allowsHitTesting(chromeVisible && !loading)
         }
         .background(MouseActivityCatcher { revealChrome() })
+        .animation(.easeInOut(duration: 0.45), value: loading)
         .onAppear {
+            if poster == nil { poster = coordinator.preparingPoster }
             beginPlayback()
             revealChrome()
             startMarkTimer()
@@ -63,6 +86,7 @@ struct PlayerWindowView: View {
         }
         .onDisappear {
             hideWork?.cancel()
+            monitorTask?.cancel()
             markTimer?.invalidate()
             sleepBlocker.detach()
             sendFinalMark()
@@ -77,6 +101,52 @@ struct PlayerWindowView: View {
         }
         .onExitCommand {
             close()
+        }
+        // Плеер реально пошёл — убираем заставку. Пока буферизуется —
+        // возвращаем, чтобы вместо кривого спиннера AVKit был ровный наш.
+        .onReceive(player.publisher(for: \.timeControlStatus)) { status in
+            switch status {
+            case .playing:
+                startRevealMonitor()
+            case .waitingToPlayAtSpecifiedRate:
+                loading = true
+            case .paused:
+                if playbackStarted { loading = false }
+            @unknown default:
+                break
+            }
+        }
+    }
+
+    /// Показывает видео только когда время реально пошло. `timeControlStatus`
+    /// бывает «.playing» ещё до старта картинки (AVKit рисует свой смещённый
+    /// спиннер) — поэтому ждём фактического продвижения текущей позиции.
+    private func startRevealMonitor() {
+        guard monitorTask == nil, loading else { return }
+        monitorTask = Task { @MainActor in
+            var baseline = player.currentTime().seconds
+            var ticks = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                    loading = true
+                    baseline = player.currentTime().seconds
+                    ticks = 0
+                    continue
+                }
+                let now = player.currentTime().seconds
+                if now - baseline >= 0.25 {
+                    ticks += 1
+                    baseline = now
+                }
+                if ticks >= 2 {
+                    playbackStarted = true
+                    loading = false
+                    coordinator.playerReady()
+                    return
+                }
+            }
         }
     }
 

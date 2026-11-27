@@ -52,7 +52,7 @@ struct ActorCard: View {
 /// размытие при анимации даёт мерцание) — поэтому не «моргает».
 struct GlowSkeleton: View {
     var cornerRadius: CGFloat = 10
-    var tint: Color = .accentColor
+    var tint: Color = .appAccent
 
     @State private var pulse = false
 
@@ -75,7 +75,7 @@ struct GlowSkeleton: View {
 }
 
 struct ActorSkeleton: View {
-    var tint: Color = .accentColor
+    var tint: Color = .appAccent
 
     @State private var pulse = false
 
@@ -126,6 +126,8 @@ struct ActorProfileView: View {
     @EnvironmentObject private var api: APIClient
 
     @State private var films: [FilmCredit] = []
+    @State private var photos: [URL] = []
+    @State private var photosLoading = true
     @State private var loading = true
     @State private var kinopubItems: [KinopubItem] = []
     @State private var kinopubLoading = true
@@ -149,6 +151,7 @@ struct ActorProfileView: View {
                             }
                         )
                     kinopubSection
+                    photosSection
                     filmography
                 }
                 .padding(.horizontal, 32)
@@ -228,6 +231,40 @@ struct ActorProfileView: View {
             }
 
             Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Photos
+
+    @ViewBuilder
+    private var photosSection: some View {
+        if photosLoading || !photos.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Фото")
+                    .font(.title3.weight(.bold))
+
+                if photosLoading {
+                    HStack(spacing: 12) {
+                        ForEach(0..<4, id: \.self) { _ in
+                            GlowSkeleton(cornerRadius: 10, tint: tint)
+                                .frame(width: 210, height: 280)
+                        }
+                    }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(photos, id: \.self) { url in
+                                RemoteImage(url: url, contentMode: .fill) {
+                                    Color.gray.opacity(0.15)
+                                }
+                                .frame(width: 210, height: 280)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
         }
     }
 
@@ -356,9 +393,14 @@ struct ActorProfileView: View {
     private func load() async {
         loading = true
         kinopubLoading = true
+        photosLoading = true
 
         async let filmsTask = PeopleService.shared.filmography(for: actor, excluding: currentIMDb)
         async let kinopubTask = loadKinopub()
+        async let photosTask = PeopleService.shared.photos(for: actor)
+
+        photos = await photosTask
+        photosLoading = false
 
         films = await filmsTask
         loading = false

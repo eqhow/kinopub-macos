@@ -2,6 +2,7 @@ import SwiftUI
 
 enum Tab: String, CaseIterable, Identifiable {
     case home = "Главная"
+    case collections = "Подборки"
     case movies = "Фильмы"
     case series = "Сериалы"
     case anime = "Аниме"
@@ -14,6 +15,7 @@ enum Tab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .home: return "house.fill"
+        case .collections: return "rectangle.stack.fill"
         case .movies: return "film.fill"
         case .series: return "tv.fill"
         case .anime: return "sparkles"
@@ -35,134 +37,185 @@ struct ContentView: View {
 
     @State private var tab: Tab = .home
     @State private var user: UserInfo?
+    /// Профиль актёра, открытый из поиска/подсказок сайдбара.
+    @State private var searchActor: Actor?
+    /// Подборка, открытая из подсказок сайдбара.
+    @State private var sidebarCollection: OpenedCollection?
+    /// Сайдбар сворачивается влево во время кинематографичного запуска.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     private var activeTint: Color? {
         theme.tint(for: navigation.stack.last?.id)
     }
 
     var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 0) {
-                sidebarSearch
-                ZStack(alignment: .top) {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 2) {
-                            sidebarGroupTitle("Главное")
-                            ForEach([Tab.home, .history]) { item in
-                                sidebarRow(item)
-                            }
-
-                            sidebarGroupTitle("Категории")
-                                .padding(.top, 12)
-                            ForEach([Tab.movies, .series, .anime, .cartoons]) { item in
-                                sidebarRow(item)
-                            }
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                    }
-
-                    if !suggestions.isEmpty {
-                        VStack(spacing: 0) {
-                            ForEach(suggestions) { item in
-                                Button {
-                                    search.query = item.russianTitle
-                                    suggestions = []
-                                    navigation.open(item, sourceID: "sugg-\(item.id)")
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        RemoteImage(url: item.bestPoster) {
-                                            Color.gray.opacity(0.15)
-                                        }
-                                        .frame(width: 30, height: 45)
-                                        .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(item.russianTitle)
-                                                .font(.caption.weight(.medium))
-                                                .lineLimit(1)
-                                            if let year = item.year {
-                                                Text(String(year))
-                                                    .font(.caption2)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        }
-
-                                        Spacer(minLength: 0)
-                                    }
-                                    .padding(.vertical, 4)
-                                    .padding(.horizontal, 10)
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
-                        .padding(.horizontal, 8)
-                        .transition(.opacity)
-                    }
+        decoratedSplit
+            .onChange(of: player.preparing) { _, preparing in
+                withAnimation(.easeInOut(duration: 0.65)) {
+                    columnVisibility = preparing ? .detailOnly : .all
                 }
-                profileFooter
             }
-            .navigationSplitViewColumnWidth(min: 210, ideal: 230)
-            .task(id: search.query) {
-                await fetchSuggestions()
+            .onChange(of: tab) { _, _ in
+                searchActor = nil
+                sidebarCollection = nil
+                navigation.closeAll()
             }
+            .task { await bootstrap() }
+    }
+
+    private var decoratedSplit: some View {
+        splitView
+            .overlay { themeWash }
+            .overlay { playerOverlays }
+            .animation(.easeInOut(duration: 0.7), value: activeTint)
+            .animation(.easeInOut(duration: 0.3), value: player.request)
+            .animation(.easeInOut(duration: 0.65), value: player.preparing)
+    }
+
+    private var splitView: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
         } detail: {
-            GeometryReader { geo in
-                ZStack {
-                    screen
-
-                    ForEach(Array(navigation.stack.enumerated()), id: \.element.id) { index, node in
-                        DetailView(
-                            nodeID: node.id,
-                            route: node.route,
-                            isTop: index == navigation.stack.count - 1,
-                            onBack: closeTop
-                        )
-                        .transition(.asymmetric(insertion: .opacity, removal: .opacity))
-                        .zIndex(Double(index + 1))
-                    }
-                }
-                .onAppear { navigation.detailFrame = geo.frame(in: .global) }
-                .onChange(of: geo.frame(in: .global)) { _, frame in
-                    navigation.detailFrame = frame
-                }
-            }
+            detailPane
         }
         .environmentObject(navigation)
         .environmentObject(theme)
-        .tint(activeTint ?? .accentColor)
+        .tint(activeTint ?? .appAccent)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .navigationTitle("")
         .background {
             WindowTheme(color: activeTint, blackedOut: player.request != nil)
                 .frame(width: 0, height: 0)
         }
-        .overlay { themeWash }
-        .overlay { playerOverlays }
-        .animation(.easeInOut(duration: 0.7), value: activeTint)
-        .animation(.easeInOut(duration: 0.22), value: player.request)
-        .animation(.easeInOut(duration: 0.2), value: player.preparing)
-        .onChange(of: tab) { _, _ in
-            navigation.closeAll()
+    }
+
+    private func bootstrap() async {
+        user = try? await api.user()
+        let env = ProcessInfo.processInfo.environment
+        if let q = env["KINOPUB_DBG_SEARCH"], !q.isEmpty {
+            search.query = q
+            tab = .search
+        } else if let q = env["KINOPUB_DBG_OPEN"], !q.isEmpty,
+                  let first = try? await api.search(q).first {
+            navigation.open(first, sourceID: "dbg-open-\(first.id)")
+        } else if env["KINOPUB_DBG_PLAY"] != nil, let entry = try? await api.history().first {
+            ResumePlayback.start(entry, api: api, player: player)
+        } else if env["KINOPUB_DBG_SERIES"] != nil,
+                  let s = try? await api.hotSeries().first {
+            navigation.open(s, sourceID: "dbg-\(s.id)")
+        } else if let t = env["KINOPUB_DBG_TAB"],
+                  let match = Tab.allCases.first(where: { $0.rawValue.lowercased() == t.lowercased() }) {
+            tab = match
         }
-        .task {
-            user = try? await api.user()
-            let env = ProcessInfo.processInfo.environment
-            if let q = env["KINOPUB_DBG_OPEN"], !q.isEmpty,
-               let first = try? await api.search(q).first {
-                navigation.open(first, sourceID: "dbg-open-\(first.id)")
-            } else if env["KINOPUB_DBG_PLAY"] != nil, let entry = try? await api.history().first {
-                ResumePlayback.start(entry, api: api, player: player)
-            } else if env["KINOPUB_DBG_SERIES"] != nil,
-               let s = try? await api.hotSeries().first {
-                navigation.open(s, sourceID: "dbg-\(s.id)")
-            } else if let t = env["KINOPUB_DBG_TAB"],
-                      let match = Tab.allCases.first(where: { $0.rawValue.lowercased() == t.lowercased() }) {
-                tab = match
+    }
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            sidebarSearch
+
+            ZStack(alignment: .top) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach([Tab.home, .collections, .history]) { item in
+                            sidebarRow(item)
+                        }
+
+                        sidebarGroupTitle("Категории")
+                            .padding(.top, 12)
+                        ForEach([Tab.movies, .series, .anime, .cartoons]) { item in
+                            sidebarRow(item)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                }
+
+                if tab != .search, !suggestions.isEmpty || !actorSuggestions.isEmpty || !collectionSuggestions.isEmpty {
+                    Group {
+                        if suggestions.count + actorSuggestions.count + collectionSuggestions.count <= 5 {
+                            suggestionsContent
+                        } else {
+                            ScrollView { suggestionsContent }
+                                .frame(maxHeight: 420)
+                        }
+                    }
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                    .padding(.horizontal, 8)
+                    .transition(.opacity)
+                }
             }
+
+            profileFooter
+        }
+        .navigationSplitViewColumnWidth(min: 210, ideal: 230)
+        .task(id: search.query) {
+            await fetchSuggestions()
+        }
+    }
+
+    private var detailPane: some View {
+        GeometryReader { geo in
+            detailContent
+                .onAppear { navigation.detailFrame = geo.frame(in: .global) }
+                .onChange(of: geo.frame(in: .global)) { _, frame in
+                    navigation.detailFrame = frame
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var detailContent: some View {
+        ZStack {
+            Group {
+                screen
+
+                ForEach(Array(navigation.stack.enumerated()), id: \.element.id) { index, node in
+                    DetailView(
+                        nodeID: node.id,
+                        route: node.route,
+                        isTop: index == navigation.stack.count - 1,
+                        onBack: closeTop
+                    )
+                    .transition(.asymmetric(insertion: .opacity, removal: .opacity))
+                    .zIndex(Double(index + 1))
+                }
+
+                if let actor = searchActor {
+                    ActorProfileView(
+                        actor: actor,
+                        tint: .appAccent,
+                        currentIMDb: nil,
+                        onBack: {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                searchActor = nil
+                            }
+                        },
+                        onSelectItem: { item in
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                searchActor = nil
+                            }
+                            navigation.open(item, sourceID: "search-actor-\(item.id)")
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(0.5)
+                }
+
+                if let collection = sidebarCollection {
+                    CollectionDetailView(collectionID: collection.id, title: collection.title) {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            sidebarCollection = nil
+                        }
+                    }
+                    .background(Color(NSColor.windowBackgroundColor))
+                    .transition(.opacity)
+                    .zIndex(2)
+                }
+            }
+            // Контент проседает вниз и гаснет, пока идёт запуск.
+            .offset(y: player.preparing ? 110 : 0)
+            .opacity(player.preparing ? 0 : 1)
         }
     }
 
@@ -171,6 +224,8 @@ struct ContentView: View {
         switch tab {
         case .home:
             HomeView()
+        case .collections:
+            CollectionsView()
         case .movies:
             CategoryView(type: "movie", title: "Фильмы")
         case .series:
@@ -180,7 +235,11 @@ struct ContentView: View {
         case .cartoons:
             CategoryView(type: nil, title: "Мультфильмы", fixedGenreID: 23)
         case .search:
-            SearchView(search: search)
+            SearchView(search: search) { actor in
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    searchActor = actor
+                }
+            }
         case .history:
             HistoryView()
         }
@@ -199,27 +258,19 @@ struct ContentView: View {
     @ViewBuilder
     private var playerOverlays: some View {
         ZStack {
-            if player.preparing && player.request == nil {
-                Color.black
-                    .ignoresSafeArea()
-                    .overlay {
-                        // Нативный «эпловский» индикатор. Принудительно тёмная
-                        // схема — иначе в светлой теме спиннер тёмный и на чёрном
-                        // фоне не виден.
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .controlSize(.large)
-                            .environment(\.colorScheme, .dark)
-                    }
-                    .zIndex(15)
+            if player.preparing, player.request == nil {
+                LaunchCurtain(poster: player.preparingPoster)
+                    .transition(.opacity)
+                    .zIndex(30)
             }
+
             if let request = player.request {
                 PlayerWindowView(request: request)
-                    .transition(.opacity)
                     .zIndex(20)
             }
         }
         .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.5), value: player.preparing)
     }
 
     @ViewBuilder
@@ -259,7 +310,7 @@ struct ContentView: View {
     /// системы.
     private func sidebarRow(_ item: Tab) -> some View {
         let selected = tab == item
-        let color = activeTint ?? .accentColor
+        let color = activeTint ?? .appAccent
         return Button {
             tab = item
         } label: {
@@ -343,13 +394,21 @@ struct ContentView: View {
                 .font(.callout)
                 .onSubmit {
                     search.submit()
+                    suggestions = []
+                    actorSuggestions = []
                     tab = .search
                 }
 
-            if !search.query.isEmpty {
+            if suggestionsLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.7)
+                    .frame(width: 14, height: 14)
+            } else if !search.query.isEmpty {
                 Button {
                     search.query = ""
                     suggestions = []
+                    actorSuggestions = []
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.caption)
@@ -366,6 +425,9 @@ struct ContentView: View {
     }
 
     @State private var suggestions: [KinopubItem] = []
+    @State private var actorSuggestions: [Actor] = []
+    @State private var collectionSuggestions: [KinopubItem] = []
+    @State private var suggestionsLoading = false
 
     private static let endDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -374,20 +436,151 @@ struct ContentView: View {
         return formatter
     }()
 
+    private var suggestionsContent: some View {
+        VStack(spacing: 0) {
+            if !suggestions.isEmpty {
+                dropdownTitle("Фильмы и сериалы")
+                ForEach(suggestions) { item in
+                    Button {
+                        search.query = item.russianTitle
+                        suggestions = []
+                        actorSuggestions = []
+                        navigation.open(item, sourceID: "sugg-\(item.id)")
+                    } label: {
+                        HStack(spacing: 8) {
+                            RemoteImage(url: item.bestPoster) {
+                                Color.gray.opacity(0.15)
+                            }
+                            .frame(width: 30, height: 45)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.russianTitle)
+                                    .font(.caption.weight(.medium))
+                                    .lineLimit(1)
+                                if let year = item.year {
+                                    Text(String(year))
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if !actorSuggestions.isEmpty {
+                if !suggestions.isEmpty {
+                    Divider().padding(.horizontal, 10)
+                }
+                dropdownTitle("Актёры")
+                ForEach(actorSuggestions) { actor in
+                    Button {
+                        search.query = actor.name
+                        suggestions = []
+                        actorSuggestions = []
+                        searchActor = actor
+                    } label: {
+                        HStack(spacing: 8) {
+                            ZStack {
+                                Circle().fill(.quaternary)
+                                RemoteImage(url: actor.photo, contentMode: .fill) {
+                                    Text(String(actor.name.prefix(1)))
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .frame(width: 30, height: 30)
+                            .clipShape(Circle())
+
+                            Text(actor.name)
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if !collectionSuggestions.isEmpty {
+                if !suggestions.isEmpty || !actorSuggestions.isEmpty {
+                    Divider().padding(.horizontal, 10)
+                }
+                dropdownTitle("Подборки")
+                ForEach(collectionSuggestions) { collection in
+                    Button {
+                        sidebarCollection = OpenedCollection(id: collection.id, title: collection.russianTitle)
+                        suggestions = []
+                        actorSuggestions = []
+                        collectionSuggestions = []
+                    } label: {
+                        HStack(spacing: 8) {
+                            CollectionFolderBadge(collectionID: collection.id)
+
+                            Text(collection.russianTitle)
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func dropdownTitle(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+    }
+
     private func fetchSuggestions() async {
         let query = search.query.trimmingCharacters(in: .whitespacesAndNewlines)
         if query.isEmpty {
             suggestions = []
+            actorSuggestions = []
+            collectionSuggestions = []
+            suggestionsLoading = false
             return
         }
         try? await Task.sleep(nanoseconds: 250_000_000)
         guard !Task.isCancelled, search.query.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
-        do {
-            let found = try await api.search(query)
-            guard !Task.isCancelled else { return }
-            suggestions = Array(found.prefix(10))
-        } catch {
-            suggestions = []
-        }
+
+        suggestionsLoading = true
+
+        async let filmTask: [KinopubItem] = (try? await api.search(query)) ?? []
+        async let actorTask: [Actor] = PeopleService.shared.searchActors(query)
+        async let collTask: [KinopubItem] = (try? await api.searchCollections(title: query)) ?? []
+
+        let foundFilms = await filmTask
+        let foundActors = await actorTask
+        let foundCollections = await collTask
+
+        guard !Task.isCancelled else { return }
+        suggestions = Array(foundFilms.prefix(8))
+        actorSuggestions = Array(foundActors.prefix(6))
+        collectionSuggestions = Array(foundCollections.prefix(6))
+        suggestionsLoading = false
     }
 }

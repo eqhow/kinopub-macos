@@ -93,7 +93,29 @@ final class APIClient: ObservableObject {
             return user
         }
     }
-    func collections() async throws -> [KinopubItem] { try await list("/v1/collections", params: ["perpage": "47"]) }
+    /// Страница подборок Kinopab с числом всего страниц для догрузки.
+    func collectionsPage(_ page: Int) async throws -> (items: [KinopubItem], totalPages: Int) {
+        try await request(path: "/v1/collections",
+                          params: ["perpage": "50", "page": "\(page)"]) { data in
+            struct Raw: Codable {
+                let items: [KinopubItem]?
+                let pagination: Pagination?
+                struct Pagination: Codable { let total: Int? }
+            }
+            let raw = try JSONDecoder().decode(Raw.self, from: data)
+            return (raw.items ?? [], max(1, raw.pagination?.total ?? 1))
+        }
+    }
+
+    /// Поиск подборок по названию.
+    func searchCollections(title: String) async throws -> [KinopubItem] {
+        try await list("/v1/collections", params: ["title": title, "perpage": "24"])
+    }
+
+    /// Элементы подборки (фильмы/сериалы), входящие в коллекцию.
+    func collectionItems(id: Int) async throws -> [KinopubItem] {
+        try await list("/v1/collections/view", params: ["id": "\(id)"])
+    }
 
     // MARK: - Transport
 

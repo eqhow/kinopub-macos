@@ -46,13 +46,11 @@ struct SecondaryButton: View {
             .font(.headline)
             .padding(.horizontal, 18)
             .padding(.vertical, 10)
-            .background((tint?.opacity(0.22) ?? .white.opacity(0.12)), in: Capsule())
+            // Только обводка + окрашенный текст/иконка, без заливки.
+            .foregroundColor(tint ?? .primary)
             .overlay {
-                if let tint {
-                    Capsule().strokeBorder(tint.opacity(0.45), lineWidth: 1)
-                }
+                Capsule().strokeBorder(tint ?? Color.primary.opacity(0.3), lineWidth: 1)
             }
-            .foregroundColor(.white)
         }
         .buttonStyle(.plain)
     }
@@ -68,6 +66,9 @@ struct CloseCircleButton: View {
     var label: String? = nil
     /// Показывать ли текст (для fade in/out по скроллу).
     var labelVisible: Bool = true
+    /// Цвет заливки кнопки. Если не задан — тёмный полупрозрачный
+    /// (для кнопок поверх постера). Для светлых экранов передай акцент.
+    var tint: Color? = nil
 
     var body: some View {
         HStack(spacing: 8) {
@@ -76,9 +77,9 @@ struct CloseCircleButton: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(width: 34, height: 34)
-                    .background(.black.opacity(0.38), in: Circle())
+                    .background(tint ?? .black.opacity(0.38), in: Circle())
                     .overlay {
-                        Circle().strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
+                        Circle().strokeBorder(.white.opacity(tint == nil ? 0.18 : 0.0), lineWidth: 0.5)
                     }
             }
             .buttonStyle(.plain)
@@ -92,9 +93,9 @@ struct CloseCircleButton: View {
                         .lineLimit(1)
                         .padding(.horizontal, 14)
                         .frame(height: 34)
-                        .background(.black.opacity(0.38), in: Capsule())
+                        .background(tint ?? .black.opacity(0.38), in: Capsule())
                         .overlay {
-                            Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5)
+                            Capsule().strokeBorder(.white.opacity(tint == nil ? 0.18 : 0.0), lineWidth: 0.5)
                         }
                 }
                 .buttonStyle(.plain)

@@ -23,7 +23,7 @@ struct DetailView: View {
     @State private var similar: [KinopubItem] = []
     @State private var artwork: MetadataService.Artwork?
     @State private var seasonNumber = 1
-    @State private var tint: Color = .accentColor
+    @State private var tint: Color = .appAccent
     @State private var cast: [Actor] = []
     @State private var castLoading = true
     @State private var selectedActor: Actor?
@@ -353,18 +353,18 @@ struct DetailView: View {
                     .font(.caption.weight(.bold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                    .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
             }
             if info.isSeries {
                 Text("Сериал")
                     .font(.caption.weight(.semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 3)
-                    .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                    .background(Color.primary.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
             }
         }
         .font(.subheadline.weight(.medium))
-        .foregroundColor(.white.opacity(0.9))
+        .foregroundColor(.secondary)
     }
 
     private var backButton: some View {
@@ -649,10 +649,9 @@ struct DetailView: View {
         guard let url = info.trailerURL else { return }
         stopTrailer()
 
-        if let window = NSApp.keyWindow, !window.styleMask.contains(.fullScreen) {
-            window.toggleFullScreen(nil)
-        }
-
+        // Открываем трейлер так же, как обычное воспроизведение — с заставкой
+        // и анимацией запуска, но в окне (юзер сам решит про фуллскрин).
+        player.beginLaunch(title: info.russianTitle, poster: artwork?.backdrop ?? info.widePoster)
         player.open(PlayRequest(
             id: info.id,
             title: info.russianTitle,
@@ -667,6 +666,7 @@ struct DetailView: View {
     private func playPrimary() {
         guard let url = primaryURL else { return }
         stopTrailer()
+        player.beginLaunch(title: info.russianTitle, poster: artwork?.backdrop ?? info.widePoster)
         let subtitle: String
         let episodeTitle: String?
         if info.isSeries, let episode = episodes.first {
@@ -692,6 +692,7 @@ struct DetailView: View {
     private func playEpisode(_ episode: Season.Episode) {
         guard let url = episode.files?.first?.bestURL else { return }
         stopTrailer()
+        player.beginLaunch(title: info.russianTitle, poster: artwork?.backdrop ?? info.widePoster)
         player.open(
             PlayRequest(
                 id: episode.id,

@@ -13,7 +13,7 @@
   <img alt="Build" src="https://github.com/eqhow/kinopub-macos/actions/workflows/build.yml/badge.svg">
   <img alt="macOS 14+" src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple">
   <img alt="Swift 5.9" src="https://img.shields.io/badge/Swift-5.9-orange?logo=swift">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.3-blue">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.1.4-blue">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 

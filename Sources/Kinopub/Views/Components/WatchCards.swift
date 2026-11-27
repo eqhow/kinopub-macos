@@ -7,17 +7,17 @@ enum ResumePlayback {
         // Не запускаем повторно, пока уже идёт подготовка — иначе можно
         // «настучать» по карточке и открыть несколько плееров.
         guard !player.preparing, player.request == nil else { return }
-        player.preparing = true
-        player.preparingTitle = entry.item.russianTitle
-        player.preparingPoster = entry.thumbnail ?? entry.item.bestPoster
+        player.beginLaunch(
+            title: entry.item.russianTitle,
+            poster: entry.thumbnail ?? entry.item.bestPoster
+        )
 
         Task {
             // В истории приходит облегчённая карточка — догружаем полную,
             // чтобы найти ссылку на конкретную серию.
             let full = (try? await api.item(id: entry.item.id)) ?? entry.item
             guard let url = resolveURL(full: full, entry: entry) else {
-                player.preparing = false
-                player.preparingTitle = nil
+                player.cancelLaunch()
                 return
             }
             let logo = await MetadataService.shared.artwork(for: full)?.logo
@@ -85,7 +85,7 @@ struct ContinueWatchingRow: View {
             Text("Продолжить просмотр").font(.title2.weight(.bold))
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 14) {
+                LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(entries) { entry in
                         Button {
                             ResumePlayback.start(entry, api: api, player: player)
@@ -110,10 +110,9 @@ struct ContinueCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.gray.opacity(0.12))
+                Color.black
 
-                RemoteImage(url: entry.thumbnail) {
+                RemoteImage(url: entry.thumbnail, contentMode: .fill) {
                     ShimmerPlaceholder()
                 }
 
@@ -131,10 +130,11 @@ struct ContinueCard: View {
                     Text(remainingText ?? "Продолжить")
                         .font(.caption.weight(.semibold))
                 }
-                .foregroundColor(.white)
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                // Подложка и текст тянутся от темы: на светлой — белая с чёрным.
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .padding(.leading, 10)
                 .padding(.bottom, 18)
             }
@@ -172,7 +172,7 @@ struct ContinueCard: View {
             }
             .frame(width: 320, alignment: .leading)
         }
-        .frame(width: 320)
+        .frame(width: 320, height: 218, alignment: .topLeading)
         .contentShape(Rectangle())
     }
 
@@ -210,10 +210,6 @@ struct HistoryCard: View {
 
                 RemoteImage(url: entry.item.bestPoster) {
                     ShimmerPlaceholder()
-                }
-
-                if hover {
-                    Color.black.opacity(0.28)
                 }
             }
             .frame(width: 160, height: 240)
@@ -262,10 +258,9 @@ struct HistoryWideCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomLeading) {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.gray.opacity(0.12))
+                Color.black
 
-                RemoteImage(url: entry.thumbnail) {
+                RemoteImage(url: entry.thumbnail, contentMode: .fill) {
                     ShimmerPlaceholder()
                 }
 
@@ -321,7 +316,7 @@ struct HistoryWideCard: View {
             }
             .frame(width: 320, alignment: .leading)
         }
-        .frame(width: 320, alignment: .leading)
+        .frame(width: 320, height: 218, alignment: .topLeading)
         .contentShape(Rectangle())
     }
 }

@@ -308,8 +308,10 @@ struct HeroSlider: View {
                                     .font(.headline)
                                     .padding(.horizontal, 22)
                                     .padding(.vertical, 11)
-                                    .background(.white.opacity(0.2), in: Capsule())
-                                    .foregroundColor(.white)
+                                    .foregroundStyle(.primary)
+                                    .overlay {
+                                        Capsule().strokeBorder(.primary.opacity(0.5), lineWidth: 1)
+                                    }
                             }
                             .buttonStyle(.plain)
                         }
@@ -354,10 +356,10 @@ struct HeroSlider: View {
                 if i == index {
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(.white.opacity(0.30))
+                            .fill(.primary.opacity(0.30))
                             .frame(width: 26, height: 6)
                         Capsule()
-                            .fill(.white)
+                            .fill(.primary)
                             .frame(width: max(0, 26 * progress), height: 6)
                     }
                     .frame(width: 26, height: 6)
@@ -365,7 +367,7 @@ struct HeroSlider: View {
                     .onTapGesture { go(to: i, forward: true) }
                 } else {
                     Capsule()
-                        .fill(.white.opacity(0.4))
+                        .fill(.primary.opacity(0.55))
                         .frame(width: 6, height: 6)
                         .contentShape(Rectangle().inset(by: -7))
                         .onTapGesture { go(to: i, forward: i > index) }
@@ -374,7 +376,9 @@ struct HeroSlider: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.black.opacity(0.28), in: Capsule())
+        // Подложка и элементы тянутся от темы: на светлой — белое с чёрным,
+        // на тёмной — наоборот.
+        .background(.regularMaterial, in: Capsule())
         .padding(20)
     }
 
@@ -481,6 +485,7 @@ struct HeroSlider: View {
     // MARK: - Direct Play
 
     private func playNow(_ item: KinopubItem) {
+        player.beginLaunch(title: item.russianTitle, poster: item.widePoster ?? item.bestPoster)
         Task {
             let full = try? await api.item(id: item.id)
             guard !Task.isCancelled else { return }
@@ -490,7 +495,10 @@ struct HeroSlider: View {
             } else {
                 url = full?.videos?.first?.files?.first?.bestURL
             }
-            guard let url else { return }
+            guard let url else {
+                await MainActor.run { player.cancelLaunch() }
+                return
+            }
             await MainActor.run {
                 stopTrailer()
                 player.open(PlayRequest(
@@ -528,9 +536,9 @@ struct HeroSlider: View {
             guard let url = full?.trailerURL ?? item.trailerURL else { return }
             await MainActor.run {
                 stopTrailer()
-                if let window = NSApp.keyWindow, !window.styleMask.contains(.fullScreen) {
-                    window.toggleFullScreen(nil)
-                }
+                // Трейлер открывается с той же анимацией запуска, что и обычное
+                // видео, но в окне — фуллскрин юзер решает сам.
+                player.beginLaunch(title: item.russianTitle, poster: artwork?.backdrop ?? item.widePoster)
                 player.open(PlayRequest(id: item.id, title: item.russianTitle, url: url, logo: artwork?.logo, subtitle: "Трейлер"))
             }
         }
@@ -619,10 +627,6 @@ struct PosterCard: View {
 
             RemoteImage(url: item.bestPoster) {
                 ShimmerPlaceholder()
-            }
-
-            if hover {
-                Color.black.opacity(0.28)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))

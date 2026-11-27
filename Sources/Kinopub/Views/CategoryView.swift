@@ -43,7 +43,9 @@ struct CategoryView: View {
 
             if loading {
                 Spacer()
-                ProgressView().scaleEffect(0.8)
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity)
                 Spacer()
             } else if items.isEmpty {
                 Spacer()
@@ -52,6 +54,7 @@ struct CategoryView: View {
                     systemImage: "line.3.horizontal.decrease.circle",
                     description: Text(filtered ? "Измените фильтры или запрос" : "Здесь пока нет тайтлов")
                 )
+                .frame(maxWidth: .infinity)
                 Spacer()
             } else {
                 ScrollView {
@@ -171,11 +174,11 @@ struct CategoryView: View {
             Image(systemName: "chevron.down")
                 .font(.caption2.weight(.bold))
         }
-        .foregroundStyle(active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.primary))
+        .foregroundStyle(active ? AnyShapeStyle(Color.appAccent) : AnyShapeStyle(.primary))
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .background(
-            active ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(Color.gray.opacity(0.1)),
+            active ? AnyShapeStyle(Color.appAccent.opacity(0.12)) : AnyShapeStyle(Color.gray.opacity(0.1)),
             in: Capsule()
         )
     }

@@ -8,6 +8,8 @@ struct Actor: Identifiable, Hashable {
     let imdbID: String?
     /// Имя так, как его пишет Кинопаб в поле cast — по нему ищем каталог.
     let kinopubName: String?
+    /// Заголовок статьи в английской Википедии — источник галереи фото.
+    let wikipediaTitle: String?
 }
 
 struct FilmCredit: Identifiable, Hashable {
@@ -25,6 +27,9 @@ final class PeopleService {
 
     private var castCache: [String: [Actor]] = [:]
     private var filmsCache: [String: [FilmCredit]] = [:]
+    private var actorSearchCache: [String: [Actor]] = [:]
+    private var photosCache: [String: [URL]] = [:]
+    private var wikiTitleCache: [String: String] = [:]
 
     // MARK: - Public
 
@@ -39,11 +44,15 @@ final class PeopleService {
         }
 
         let query = """
-        SELECT ?actor ?actorLabel ?image ?imdb WHERE {
+        SELECT ?actor ?actorLabel ?image ?imdb ?article WHERE {
           ?film wdt:P345 "\(imdb)".
           ?film wdt:P161 ?actor.
           OPTIONAL { ?actor wdt:P18 ?image. }
           OPTIONAL { ?actor wdt:P345 ?imdb. }
+          OPTIONAL {
+            ?article schema:about ?actor;
+                     schema:isPartOf <https://en.wikipedia.org/>.
+          }
           SERVICE wikibase:label { bd:serviceParam wikibase:language "ru,en". }
         }
         LIMIT 40
@@ -68,7 +77,8 @@ final class PeopleService {
                         photo: row["image"].flatMap { commonsURL($0.value) },
                         entityURI: entity,
                         imdbID: imdb,
-                        kinopubName: kinopubName(for: name, in: item.cast)
+                        kinopubName: kinopubName(for: name, in: item.cast),
+                        wikipediaTitle: row["article"].flatMap { articleTitle($0.value) }
                     )
                 )
             }
@@ -83,6 +93,122 @@ final class PeopleService {
         let all = await allFilms(for: actor)
         guard let imdb else { return all }
         return all.filter { $0.imdbID != imdb }
+    }
+
+    // MARK: - Actor search
+
+    /// Поиск актёров по имени через EntitySearch Викиданных. Возвращает
+    /// только людей с актёрскими профессиями, с фото и IMDb ID.
+    func searchActors(_ text: String) async -> [Actor] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 2 else { return [] }
+        let key = normalize(query)
+        if let cached = actorSearchCache[key] { return cached }
+
+        let sparqlQuery = """
+        SELECT ?person ?personLabel ?image ?imdb ?article WHERE {
+          SERVICE wikibase:mwapi {
+            bd:serviceParam wikibase:api "EntitySearch";
+                            wikibase:endpoint "www.wikidata.org";
+                            mwapi:search "\(sparqlEscape(query))";
+                            mwapi:language "ru".
+            ?person wikibase:apiOutputItem mwapi:item.
+          }
+          ?person wdt:P31 wd:Q5.
+          ?person wdt:P106 ?occupation.
+          VALUES ?occupation { wd:Q33999 wd:Q10800557 wd:Q10798782 wd:Q2405480 }
+          OPTIONAL { ?person wdt:P18 ?image. }
+          OPTIONAL { ?person wdt:P345 ?imdb. }
+          OPTIONAL {
+            ?article schema:about ?person;
+                     schema:isPartOf <https://en.wikipedia.org/>.
+          }
+          SERVICE wikibase:label { bd:serviceParam wikibase:language "ru,en". }
+        }
+        LIMIT 15
+        """
+
+        guard let rows = try? await sparql(sparqlQuery) else { return [] }
+
+        var actors: [Actor] = []
+        var seen = Set<String>()
+
+        for row in rows {
+            guard let entity = row["person"]?.value,
+                  let name = row["personLabel"]?.value.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty,
+                  !name.hasPrefix("Q"),
+                  seen.insert(entity).inserted
+            else { continue }
+
+            let imdb = row["imdb"]?.value
+            actors.append(
+                Actor(
+                    id: imdb ?? entity,
+                    name: name,
+                    photo: row["image"].flatMap { commonsURL($0.value) },
+                    entityURI: entity,
+                    imdbID: imdb,
+                    kinopubName: nil,
+                    wikipediaTitle: row["article"].flatMap { articleTitle($0.value) }
+                )
+            )
+            if actors.count >= 12 { break }
+        }
+
+        actorSearchCache[key] = actors
+        return actors
+    }
+
+    // MARK: - Photos
+
+    /// Галерея фото актёра из английской Википедии (media-list статьи).
+    func photos(for actor: Actor) async -> [URL] {
+        let key = actor.entityURI ?? actor.imdbID ?? actor.name
+        if let cached = photosCache[key] { return cached }
+
+        var result: [URL] = []
+
+        guard let title = await wikipediaTitle(for: actor),
+              let encoded = title.addingPercentEncoding(
+                  withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+              ),
+              let url = URL(string: "https://en.wikipedia.org/api/rest_v1/page/media-list/\(encoded)")
+        else { photosCache[key] = []; return [] }
+
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        request.setValue("Kinopub-macOS/1.0 (personal app)", forHTTPHeaderField: "User-Agent")
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let list = try? JSONDecoder().decode(MediaListResponse.self, from: data)
+        else { photosCache[key] = []; return [] }
+
+        let actorKey = title.lowercased() // wikipedia title → "leonardo_dicaprio"
+        var seen = Set<String>()
+
+        for item in list.items {
+            guard let url = galleryURL(from: item) else { continue }
+
+            guard let itemTitle = item.title else { continue }
+            let lowerTitle = itemTitle.lowercased()
+
+            // Только портреты: lead-изображение или файл с именем актёра
+            let isLead = item.leadImage == true
+            let matchesActor = lowerTitle.contains(actorKey)
+            guard isLead || matchesActor else { continue }
+
+            guard seen.insert(url.absoluteString).inserted else { continue }
+            result.append(url)
+            if result.count >= 6 { break }
+        }
+
+        // Скрываем секцию если ≤1 фото
+        if result.count <= 1 { result = [] }
+
+        photosCache[key] = result
+        return result
     }
 
     // MARK: - Filmography
@@ -138,6 +264,70 @@ final class PeopleService {
         return String(format: "tt%07d", value)
     }
 
+    private func sparqlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
+    private func articleTitle(_ value: String) -> String? {
+        guard let url = URL(string: value) else { return nil }
+        let name = url.lastPathComponent
+        guard !name.isEmpty else { return nil }
+        return name.removingPercentEncoding ?? name
+    }
+
+    private func wikipediaTitle(for actor: Actor) async -> String? {
+        if let title = actor.wikipediaTitle { return title }
+        guard let entity = actor.entityURI else { return nil }
+        if let cached = wikiTitleCache[entity] { return cached }
+
+        let query = """
+        SELECT ?article WHERE {
+          <\(entity)> schema:about ?article;
+                      schema:isPartOf <https://en.wikipedia.org/>.
+        }
+        LIMIT 1
+        """
+
+        guard let rows = try? await sparql(query),
+              let value = rows.first?["article"]?.value,
+              let title = articleTitle(value)
+        else { return nil }
+
+        wikiTitleCache[entity] = title
+        return title
+    }
+
+    private func galleryURL(from item: MediaListResponse.Item) -> URL? {
+        guard item.type == "image",
+              let title = item.title,
+              let source = item.srcset?.first?.src
+        else { return nil }
+
+        let lower = title.lowercased()
+        let banned = [
+            "signature", "autograph", "logo", "icon", "map of", "commons-",
+            "wikimedia", "question_book", "edit-clear", "ambox", "portal",
+            "handprint", "grave", "tomb", "statue", "wax figure", "poster",
+            "screenshot", "trailer", "footprint",
+            "walks_with", "with_", "and_", "secretary", "press_",
+            "premiere", "after_", "party", "award", "red_carpet",
+        ]
+        if banned.contains(where: { lower.contains($0) }) { return nil }
+
+        var value = source
+        if value.hasPrefix("//") { value = "https:" + value }
+        guard var components = URLComponents(string: value) else { return nil }
+        components.query = nil
+        guard let url = components.url else { return nil }
+
+        let ext = url.pathExtension.lowercased()
+        guard ["jpg", "jpeg", "png", "webp", "heic"].contains(ext) else { return nil }
+        return url
+    }
+
     private func ordered(_ actors: [Actor], by cast: String?) -> [Actor] {
         guard let cast, !cast.isEmpty else { return actors }
 
@@ -191,7 +381,8 @@ final class PeopleService {
                     photo: nil,
                     entityURI: nil,
                     imdbID: nil,
-                    kinopubName: $0
+                    kinopubName: $0,
+                    wikipediaTitle: nil
                 )
             }
     }
@@ -238,6 +429,21 @@ final class PeopleService {
 
         let decoded = try JSONDecoder().decode(SPARQLResponse.self, from: data)
         return decoded.results.bindings
+    }
+
+    private struct MediaListResponse: Decodable {
+        let items: [Item]
+
+        struct Item: Decodable {
+            let title: String?
+            let type: String?
+            let leadImage: Bool?
+            let srcset: [Source]?
+
+            struct Source: Decodable {
+                let src: String
+            }
+        }
     }
 
     private struct SPARQLResponse: Decodable {
